@@ -8,7 +8,8 @@ This tool automatically ingests security logs (such as failed logins, firewall d
 
 ## 🌟 Key Features
 
-1. **Lightweight & Local**: Runs entirely on your local machine using the `google/gemma-2b-it` model. No API keys required, ensuring sensitive logs never leave your network.
+1. **Lightweight & Local**: Runs entirely on your local machine using the `google/gemma-2b-it` model. Ensures sensitive logs never leave your network for processing.
+2. **Secure Authentication**: Uses Hugging Face tokens to authenticate access to the gated Gemma repository.
 2. **Streamlit Web Dashboard**: A sleek, user-friendly UI for manual analysis, bulk log processing, and real-time monitoring.
 3. **Real-Time Log Monitoring**: Automatically reads incoming logs from `live_logs.txt` and performs instant threat analysis.
 4. **Structured Threat Intelligence**: Extracts critical information from raw logs:
@@ -28,7 +29,13 @@ Clone the repository and install the required dependencies:
 pip install -r requirements.txt
 ```
 
-### 3. Usage
+### 3. Authentication (Required)
+The `google/gemma-2b-it` model is a gated repository. To use it:
+1. Visit the [Gemma Model Page](https://huggingface.co/google/gemma-2b-it) and click **Acknowledge license**.
+2. Create a Hugging Face token with **Read** access in your [Account Settings](https://huggingface.co/settings/tokens).
+3. You will paste this token directly into the Streamlit Web UI.
+
+### 4. Usage
 
 **Running the Dashboard**
 Start the Streamlit web application:
