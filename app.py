@@ -236,10 +236,6 @@ with tabs[0]:
     else:
         st.info("No logs found. Run `python log_generator.py` in your terminal to start the live feed!")
 
-    if auto_refresh:
-        time.sleep(5)
-        st.rerun()
-
 # --- TAB 2: BULK ANALYSIS ---
 with tabs[1]:
     st.markdown("### 📁 Batch Log Processing")
@@ -285,5 +281,11 @@ with tabs[2]:
                     st.markdown(f"**Summary:** {parsed['Summary']}")
                     st.markdown(f"**Recommended Action:** {parsed['Actions']}")
                     
+                    
                     with st.expander("Raw Model Output"):
                         st.code(raw_out)
+
+# Auto-refresh logic moved to the absolute end of the script so all tabs can render
+if 'auto_refresh' in locals() and auto_refresh:
+    time.sleep(5)
+    st.rerun()
