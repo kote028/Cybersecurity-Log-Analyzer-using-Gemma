@@ -1,188 +1,262 @@
 import streamlit as st
 import time
 import os
+import re
+import pandas as pd
 from gemma_log_analyzer import LogAnalyzer
 
-# Set page configuration
+# Set page configuration - must be first
 st.set_page_config(
-    page_title="Gemma Log Analyzer",
-    page_icon="🛡️",
+    page_title="Threat Intelligence Dashboard",
+    page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for styling
+# Custom CSS for LLM-Stats Aesthetic
 st.markdown("""
 <style>
-    .reportview-container {
-        background: #0e1117;
+    /* Dark Theme Base */
+    .stApp {
+        background-color: #0B0F19;
+        color: #E2E8F0;
+        font-family: 'Inter', 'Roboto', sans-serif;
     }
-    .main .block-container {
-        padding-top: 2rem;
+    
+    /* Headers */
+    h1, h2, h3 {
+        color: #F8FAFC !important;
+        font-weight: 600 !important;
+        letter-spacing: -0.02em;
     }
-    h1 {
-        color: #4CAF50;
+    
+    /* Metric Cards */
+    div[data-testid="metric-container"] {
+        background: linear-gradient(145deg, #1E293B 0%, #0F172A 100%);
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 1.5rem;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
     }
-    .stAlert {
+    div[data-testid="metric-container"] label {
+        color: #94A3B8 !important;
+        font-size: 0.85rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
+        color: #F8FAFC !important;
+        font-size: 2rem !important;
+        font-weight: 700 !important;
+    }
+    
+    /* Tables/Dataframes */
+    .stDataFrame {
         border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid #334155;
     }
-    .log-box {
-        background-color: #1e1e1e;
-        padding: 15px;
-        border-radius: 5px;
-        font-family: monospace;
-        border-left: 5px solid #4CAF50;
-        margin-bottom: 10px;
+    
+    /* Expanders */
+    .streamlit-expanderHeader {
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
+        border-radius: 8px !important;
+        border: 1px solid #334155 !important;
+    }
+    
+    /* Badges */
+    .badge-high { background-color: #EF4444; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+    .badge-medium { background-color: #F59E0B; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+    .badge-low { background-color: #10B981; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+    .badge-unknown { background-color: #64748B; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+    
+    /* Glowing accents */
+    .glow-text {
+        color: #38BDF8;
+        text-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
+    
+    /* Sidebar styling */
+    section[data-testid="stSidebar"] {
+        background-color: #0F172A !important;
+        border-right: 1px solid #1E293B;
     }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🛡️ Cybersecurity Log Analyzer")
-st.markdown("**Powered by Google Gemma (Lightweight LLM)**")
-st.write("Analyze server logs, firewall events, and application traces to detect potential cybersecurity threats automatically.")
+def parse_gemma_output(output_text, raw_log):
+    """Parses the Gemma numbered list output into a structured dictionary."""
+    parsed = {
+        "Log": raw_log,
+        "Risk": "Unknown",
+        "Attack Type": "Unknown",
+        "Summary": "N/A",
+        "Actions": "N/A"
+    }
+    
+    lines = output_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if re.search(r'1\.\s*Summary:', line, re.IGNORECASE):
+            parsed["Summary"] = line.split(':', 1)[1].strip()
+        elif re.search(r'2\.\s*Risk\s*Level', line, re.IGNORECASE):
+            risk = line.split(':', 1)[1].strip()
+            if "high" in risk.lower(): parsed["Risk"] = "High"
+            elif "medium" in risk.lower(): parsed["Risk"] = "Medium"
+            elif "low" in risk.lower(): parsed["Risk"] = "Low"
+        elif re.search(r'3\.\s*Attack\s*Type:', line, re.IGNORECASE):
+            parsed["Attack Type"] = line.split(':', 1)[1].strip()
+        elif re.search(r'4\.\s*Recommended\s*Actions?:', line, re.IGNORECASE):
+            parsed["Actions"] = line.split(':', 1)[1].strip()
+            
+    return parsed
 
-# Sidebar navigation
-st.sidebar.title("Navigation")
-app_mode = st.sidebar.radio("Select Mode", ["Manual Analysis", "Bulk File Upload", "Real-Time Monitoring"])
+def get_risk_badge(risk):
+    if risk == "High": return "<span class='badge-high'>High</span>"
+    if risk == "Medium": return "<span class='badge-medium'>Medium</span>"
+    if risk == "Low": return "<span class='badge-low'>Low</span>"
+    return "<span class='badge-unknown'>Unknown</span>"
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### Settings")
-offline_mode = st.sidebar.checkbox("Run Offline ✈️", value=False, help="Enable this if you have already downloaded the model and have no internet connection. It prevents the app from checking for updates.")
+# Top Bar (Title and Token)
+col_title, col_auth = st.columns([2, 1])
+with col_title:
+    st.markdown("<h1><span class='glow-text'>⚡ ThreatIntel</span> by Gemma</h1>", unsafe_allow_html=True)
+    st.write("Live AI-powered cybersecurity log analysis leaderboard.")
+with col_auth:
+    hf_token = st.text_input("🔑 Hugging Face Token", type="password", help="Required for gated Gemma model access.", placeholder="hf_xxxxxxxxxxxxxxxxxxx")
 
-if offline_mode:
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
-    os.environ["HF_DATASETS_OFFLINE"] = "1"
-else:
-    # Remove if it was set
-    os.environ.pop("TRANSFORMERS_OFFLINE", None)
-    os.environ.pop("HF_DATASETS_OFFLINE", None)
+st.markdown("<hr style='border-color: #334155; margin-top: 0px;'>", unsafe_allow_html=True)
 
-hf_token = st.sidebar.text_input("Hugging Face Token (Required)", type="password", help="Gemma is a gated model. You need a token from huggingface.co to use it.")
+# Navigation
+tabs = st.tabs(["⏱️ Live Leaderboard", "📁 Bulk Analysis", "🔍 Manual Threat Check"])
 
-# Cache the model loading so it doesn't reload on every interaction
+# Cache the model loading
 @st.cache_resource(show_spinner=False)
-def load_model(offline, token):
-    # 'offline' parameter is just to trigger a reload if the toggle changes, though usually we don't need it.
-    if not token and not offline:
-        st.warning("⚠️ Please enter your Hugging Face Token in the sidebar. Gemma is a gated model and requires authentication.")
+def load_model(token):
+    if not token:
+        st.warning("⚠️ Please enter your Hugging Face Token in the top right to initialize the AI.")
         st.stop()
-        
-    with st.spinner("Loading Gemma 2B Model... This may take a minute on first run."):
-        analyzer = LogAnalyzer(token=token if token else None)
-        return analyzer
+    with st.spinner("Initializing Gemma 2B Inference Engine..."):
+        return LogAnalyzer(token=token if token else None)
 
-analyzer = load_model(offline_mode, hf_token)
+# Only initialize if on a tab that needs it or if token is provided
+if hf_token:
+    analyzer = load_model(hf_token)
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-### About
-This tool uses the `google/gemma-2b-it` model to analyze logs and extract:
-- Summary of the event
-- Risk Level
-- Attack Type
-- Recommended Actions
-""")
-
-if app_mode == "Manual Analysis":
-    st.header("🔍 Manual Log Analysis")
-    
-    log_input = st.text_area("Paste a log entry here:", height=150, 
-                             placeholder="Example: Failed login 5 times from 192.168.1.10 in 30 seconds.")
-    
-    if st.button("Analyze Log", type="primary"):
-        if log_input.strip():
-            with st.spinner("Analyzing with Gemma..."):
-                start_time = time.time()
-                result = analyzer.analyze_log(log_input)
-                end_time = time.time()
-                
-            st.success(f"Analysis complete in {end_time - start_time:.2f} seconds!")
-            
-            st.markdown("### Analysis Result")
-            # Display result nicely
-            st.info(result)
-        else:
-            st.warning("Please enter a log to analyze.")
-
-elif app_mode == "Bulk File Upload":
-    st.header("📁 Bulk Log File Analysis")
-    
-    uploaded_file = st.file_uploader("Upload a text file containing logs (one per line)", type=["txt", "log"])
-    
-    if uploaded_file is not None:
-        file_contents = uploaded_file.read().decode("utf-8")
-        logs = [log.strip() for log in file_contents.split('\n') if log.strip()]
-        
-        st.write(f"Found {len(logs)} logs in the file.")
-        
-        if st.button("Analyze All Logs", type="primary"):
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            results = []
-            for i, log in enumerate(logs):
-                status_text.text(f"Analyzing log {i+1} of {len(logs)}...")
-                res = analyzer.analyze_log(log)
-                results.append({"log": log, "analysis": res})
-                progress_bar.progress((i + 1) / len(logs))
-                
-            status_text.text("Analysis complete!")
-            
-            st.markdown("### Results")
-            for item in results:
-                with st.expander(f"Log: {item['log'][:50]}..."):
-                    st.markdown(f"<div class='log-box'>{item['log']}</div>", unsafe_allow_html=True)
-                    st.info(item['analysis'])
-
-elif app_mode == "Real-Time Monitoring":
-    st.header("⏱️ Real-Time Log Monitoring")
-    st.write("Monitoring `live_logs.txt` for new entries...")
-    
-    log_file_path = "live_logs.txt"
-    
-    if not os.path.exists(log_file_path):
-        with open(log_file_path, "w") as f:
-            f.write("")
-    
-    col1, col2 = st.columns([1, 4])
+# --- TAB 1: REAL-TIME MONITORING (The Leaderboard) ---
+with tabs[0]:
+    col1, col2 = st.columns([1, 5])
     with col1:
-        auto_refresh = st.checkbox("Auto-Refresh", value=False)
-    
-    if auto_refresh:
-        st_autorefresh = st.empty()
-        st_autorefresh.markdown("*Auto-refreshing every 5 seconds...*")
-    
-    # Read the file
+        auto_refresh = st.checkbox("Auto-Refresh 🔄", value=False)
+        if auto_refresh:
+            st.empty().markdown("*Live polling active...*")
+            
+    log_file_path = "live_logs.txt"
+    if not os.path.exists(log_file_path):
+        with open(log_file_path, "w") as f: f.write("")
+        
     try:
         with open(log_file_path, "r") as f:
             lines = f.readlines()
-    except Exception as e:
-        st.error(f"Error reading {log_file_path}: {e}")
-        lines = []
+    except: lines = []
     
-    st.metric("Total Logs Captured", len(lines))
+    # Process latest logs
+    display_count = min(10, len(lines))
+    recent_logs = list(reversed(lines))[:display_count]
     
-    # Analyze the last few logs to save time, or show all if short
-    display_count = min(5, len(lines))
-    if len(lines) > 0:
-        st.subheader(f"Latest {display_count} Logs")
-        
-        # Reverse to show newest first
-        recent_logs = list(reversed(lines))[:display_count]
-        
-        for i, log in enumerate(recent_logs):
-            if log.strip():
-                with st.container():
-                    st.markdown(f"<div class='log-box'>{log.strip()}</div>", unsafe_allow_html=True)
-                    # We might not want to run Gemma on every auto-refresh to save compute, 
-                    # but for demonstration we'll show a button or run it if it's new.
-                    with st.expander("Show AI Analysis"):
-                        with st.spinner("Analyzing..."):
-                            analysis = analyzer.analyze_log(log.strip())
-                            st.write(analysis)
+    # KPI Cards
+    if hf_token and recent_logs:
+        with st.spinner("Analyzing live feed..."):
+            parsed_results = []
+            high_risk_count = 0
+            
+            for log in recent_logs:
+                if log.strip():
+                    raw_out = analyzer.analyze_log(log.strip())
+                    parsed = parse_gemma_output(raw_out, log.strip())
+                    parsed_results.append(parsed)
+                    if parsed["Risk"] == "High": high_risk_count += 1
+            
+            # Metrics Row
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Logs Monitored", len(lines))
+            m2.metric("Recent Threats", len(parsed_results))
+            m3.metric("High Risk", high_risk_count)
+            m4.metric("Engine", "Gemma 2B")
+            
+            st.markdown("### 🚨 Threat Leaderboard")
+            
+            # Display as a styled HTML table for ultimate sleekness
+            html_table = """
+            <table style='width:100%; text-align:left; border-collapse: collapse;'>
+                <tr style='background-color:#1E293B; color:#94A3B8; border-bottom:1px solid #334155;'>
+                    <th style='padding:12px;'>Risk</th>
+                    <th style='padding:12px;'>Attack Type</th>
+                    <th style='padding:12px;'>Summary</th>
+                    <th style='padding:12px;'>Raw Log</th>
+                </tr>
+            """
+            for res in parsed_results:
+                html_table += f"""
+                <tr style='border-bottom:1px solid #1E293B; background-color:#0B0F19;'>
+                    <td style='padding:12px;'>{get_risk_badge(res['Risk'])}</td>
+                    <td style='padding:12px; font-weight:500; color:#F8FAFC;'>{res['Attack Type']}</td>
+                    <td style='padding:12px; color:#CBD5E1; font-size:0.9em;'>{res['Summary']}</td>
+                    <td style='padding:12px; color:#64748B; font-family:monospace; font-size:0.8em;'>{res['Log'][:50]}...</td>
+                </tr>
+                """
+            html_table += "</table>"
+            st.markdown(html_table, unsafe_allow_html=True)
+            
+    elif not hf_token:
+        st.info("Waiting for API Token...")
     else:
-        st.info("No logs found in live_logs.txt. Run `python log_generator.py` in another terminal to start generating logs!")
-        
+        st.info("No logs found. Run `python log_generator.py` in your terminal to start the live feed!")
+
     if auto_refresh:
         time.sleep(5)
         st.rerun()
+
+# --- TAB 2: BULK ANALYSIS ---
+with tabs[1]:
+    st.markdown("### 📁 Batch Log Processing")
+    uploaded_file = st.file_uploader("Drop a .txt or .log file here", type=["txt", "log"])
+    
+    if uploaded_file and hf_token:
+        logs = [log.strip().decode('utf-8') for log in uploaded_file.readlines() if log.strip()]
+        st.write(f"Detected **{len(logs)}** log entries.")
+        
+        if st.button("🚀 Execute Bulk Analysis"):
+            progress_bar = st.progress(0)
+            parsed_results = []
+            
+            start_time = time.time()
+            for i, log in enumerate(logs):
+                raw_out = analyzer.analyze_log(log)
+                parsed_results.append(parse_gemma_output(raw_out, log))
+                progress_bar.progress((i + 1) / len(logs))
+            duration = time.time() - start_time
+            
+            st.success(f"Analysis completed in {duration:.2f} seconds.")
+            
+            df = pd.DataFrame(parsed_results)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+# --- TAB 3: MANUAL CHECK ---
+with tabs[2]:
+    st.markdown("### 🔍 Sandbox Analysis")
+    log_input = st.text_area("Input Raw Log Data", height=150, placeholder="Failed login 5 times from 192.168.1.10...")
+    
+    if st.button("Analyze Threat", type="primary") and hf_token:
+        if log_input.strip():
+            with st.spinner("Processing through Gemma..."):
+                raw_out = analyzer.analyze_log(log_input)
+                parsed = parse_gemma_output(raw_out, log_input)
+                
+                st.markdown(f"### {get_risk_badge(parsed['Risk'])} {parsed['Attack Type']}", unsafe_allow_html=True)
+                st.markdown(f"**Summary:** {parsed['Summary']}")
+                st.markdown(f"**Recommended Action:** {parsed['Actions']}")
+                
+                with st.expander("Raw Model Output"):
+                    st.code(raw_out)
