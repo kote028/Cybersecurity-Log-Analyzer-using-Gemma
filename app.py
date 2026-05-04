@@ -10,7 +10,7 @@ st.set_page_config(
     page_title="Threat Intelligence Dashboard",
     page_icon="⚡",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # Custom CSS for LLM-Stats Aesthetic
@@ -131,18 +131,40 @@ st.markdown("<hr style='border-color: #334155; margin-top: 0px;'>", unsafe_allow
 # Navigation
 tabs = st.tabs(["⏱️ Live Leaderboard", "📁 Bulk Analysis", "🔍 Manual Threat Check"])
 
+# Settings Sidebar
+st.sidebar.markdown("### ⚙️ Settings")
+inference_mode = st.sidebar.radio(
+    "Inference Engine", 
+    ["Cloud API (Instant)", "Local Model (6GB Download)"],
+    help="Cloud API runs instantly but requires internet. Local Model downloads 6GB to your machine but allows offline mode."
+)
+
+offline_mode = False
+if inference_mode == "Local Model (6GB Download)":
+    offline_mode = st.sidebar.checkbox("Run Offline ✈️", value=False, help="Enable this if you've already downloaded the model and have no internet.")
+
+if offline_mode:
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    os.environ["HF_DATASETS_OFFLINE"] = "1"
+else:
+    os.environ.pop("TRANSFORMERS_OFFLINE", None)
+    os.environ.pop("HF_DATASETS_OFFLINE", None)
+
 # Cache the model loading
 @st.cache_resource(show_spinner=False)
-def load_model(token):
+def load_model(token, mode_string):
     if not token:
         st.warning("⚠️ Please enter your Hugging Face Token in the top right to initialize the AI.")
         st.stop()
-    with st.spinner("Initializing Gemma 2B Inference Engine..."):
-        return LogAnalyzer(token=token if token else None)
+        
+    is_local = (mode_string == "Local Model (6GB Download)")
+    
+    with st.spinner("Initializing Gemma 2B Inference Engine... (Local mode may take 15 mins to download 6GB)"):
+        return LogAnalyzer(token=token if token else None, local_mode=is_local)
 
-# Only initialize if on a tab that needs it or if token is provided
+# Only initialize if token is provided
 if hf_token:
-    analyzer = load_model(hf_token)
+    analyzer = load_model(hf_token, inference_mode)
 
 # --- TAB 1: REAL-TIME MONITORING (The Leaderboard) ---
 with tabs[0]:
@@ -250,13 +272,18 @@ with tabs[2]:
     
     if st.button("Analyze Threat", type="primary") and hf_token:
         if log_input.strip():
-            with st.spinner("Processing through Gemma..."):
+            with st.spinner("Processing through Gemma (This might take 10-30 seconds if Cloud API is waking up)..."):
                 raw_out = analyzer.analyze_log(log_input)
-                parsed = parse_gemma_output(raw_out, log_input)
                 
-                st.markdown(f"### {get_risk_badge(parsed['Risk'])} {parsed['Attack Type']}", unsafe_allow_html=True)
-                st.markdown(f"**Summary:** {parsed['Summary']}")
-                st.markdown(f"**Recommended Action:** {parsed['Actions']}")
-                
-                with st.expander("Raw Model Output"):
-                    st.code(raw_out)
+                # If there's an error from the API, show it directly
+                if "Error" in raw_out:
+                    st.error(raw_out)
+                else:
+                    parsed = parse_gemma_output(raw_out, log_input)
+                    
+                    st.markdown(f"### {get_risk_badge(parsed['Risk'])} {parsed['Attack Type']}", unsafe_allow_html=True)
+                    st.markdown(f"**Summary:** {parsed['Summary']}")
+                    st.markdown(f"**Recommended Action:** {parsed['Actions']}")
+                    
+                    with st.expander("Raw Model Output"):
+                        st.code(raw_out)
