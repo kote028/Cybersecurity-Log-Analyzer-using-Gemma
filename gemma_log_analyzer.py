@@ -33,7 +33,7 @@ Log:
 """
         try:
             if self.local_mode:
-                result = self.pipe(prompt, max_new_tokens=200)
+                result = self.pipe(prompt, max_new_tokens=200, max_length=None)
                 generated_text = result[0]["generated_text"]
             else:
                 generated_text = self.client.text_generation(
